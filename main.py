@@ -5,6 +5,7 @@ import os
 import re
 from datetime import datetime
 import time
+import random
 
 # =========================
 # VOICE ENGINE
@@ -17,14 +18,24 @@ def speak(text):
     speaker.Volume = 100
     speaker.Speak(text)
 
+acknowledgements = [
+    "At once, sir.",
+    "Understood.",
+    "Right away.",
+    "Processing your request.",
+    "Certainly."
+]
+
+def jarvis_ack():
+    speak(random.choice(acknowledgements))
+
 # =========================
-# MEMORY STATE
+# MEMORY
 # =========================
 memory = {
     "last_app": None,
     "last_site": None,
-    "last_query": None,
-    "last_action": None
+    "last_query": None
 }
 
 # =========================
@@ -33,21 +44,23 @@ memory = {
 apps = {
     "chrome": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     "spotify": r"C:\Users\skybl\AppData\Roaming\Spotify\Spotify.exe",
-    "notepad": "notepad",
-    "calculator": "calc",
+    "notepad": r"notepad",
+    "calculator": r"calc",
+    "powerpoint": r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
     "word": r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
     "excel": r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
-    "powerpoint": r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
     "outlook": r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE"
 }
 
-uk_sites = {
-    "amazon": "https://www.amazon.co.uk",
-    "ebay": "https://www.ebay.co.uk",
-    "bbc": "https://www.bbc.co.uk",
-    "bbcnews": "https://www.bbc.co.uk/news",
-    "google": "https://www.google.co.uk",
-    "youtube": "https://www.youtube.com"
+app_aliases = {
+    "word": ["word", "document", "doc"],
+    "excel": ["excel", "spreadsheet", "sheet"],
+    "powerpoint": ["powerpoint", "power point", "slides", "presentation", "power"],
+    "outlook": ["outlook", "email", "mail"],
+    "chrome": ["chrome", "browser", "internet"],
+    "spotify": ["spotify", "music"],
+    "notepad": ["notepad", "notes"],
+    "calculator": ["calculator", "calc"]
 }
 
 # =========================
@@ -68,7 +81,7 @@ def listen():
         return ""
 
 # =========================
-# CLEANER (NLU PREPROCESSOR)
+# CLEANING
 # =========================
 def clean(text):
     text = text.lower()
@@ -83,45 +96,41 @@ def clean(text):
 
     return " ".join(text.split())
 
-
 def fix_speech_errors(text):
     corrections = {
-        "amazn": "amazon",
-        "amzon": "amazon",
         "mzon": "amazon",
-        "yotube": "youtube",
+        "amzon": "amazon",
+        "amazn": "amazon",
         "tube": "youtube",
-        "googel": "google",
-        "googl": "google",
-        "bbcne": "bbc news",
-        "netflixx": "netflix"
+        "yotube": "youtube",
+        "googl": "google"
     }
-
-def is_valid_command(text):
-    text = text.strip()
-
-    # too short = likely broken speech
-    if len(text) < 3:
-        return False
-
-    # single random fragments like "mzon"
-    if len(text.split()) == 1 and len(text) < 4:
-        return False
-
-    return True
 
     for wrong, correct in corrections.items():
         text = text.replace(wrong, correct)
 
     return text
 
+def is_valid_command(text):
+    if not text or not isinstance(text, str):
+        return False
+
+    text = text.strip()
+
+    if len(text) < 3:
+        return False
+
+    if len(text.split()) == 1 and len(text) < 4:
+        return False
+
+    return True
 
 # =========================
-# INTENT DETECTION
+# INTENT
 # =========================
 def get_intent(text):
 
-    if "repeat" in text or "again" in text:
+    if any(x in text for x in ["repeat", "again"]):
         return "repeat"
 
     if "youtube" in text and "search" in text:
@@ -139,100 +148,74 @@ def get_intent(text):
     if "time" in text:
         return "time"
 
-    if "your name" in text:
-        return "identity"
-
     return "unknown"
 
 # =========================
-# ENTITY EXTRACTION
+# SITE RESOLUTION (FIXES YOUR BUG)
 # =========================
+def resolve_site(site):
+
+    known = {
+        "amazon": "https://www.amazon.co.uk",
+        "ebay": "https://www.ebay.co.uk",
+        "bbc": "https://www.bbc.co.uk",
+        "google": "https://www.google.co.uk",
+        "youtube": "https://www.youtube.com"
+    }
+
+    site = site.lower().strip()
+
+    # exact match
+    if site in known:
+        return known[site]
+
+    # fuzzy match (THIS FIXES "mzon" / "tube")
+    for k in known:
+        if k in site or site in k:
+            return known[k]
+
+    # safety fallback
+    if len(site) < 4:
+        return None
+
+    return f"https://www.{site}.com"
+
+# =========================
+# HANDLERS
+# =========================
+
 def extract_target(text, keyword):
     return text.replace(keyword, "").strip()
 
-# =========================
-# EXECUTION ENGINE
-# =========================
-def execute(text):
-
-    intent = get_intent(text)
-
-    # ---------- OPEN ----------
-    if intent == "open":
-        return handle_open(text)
-
-    # ---------- YOUTUBE SEARCH ----------
-    if intent == "youtube_search":
-        query = extract_target(text, "youtube")
-        query = extract_target(query, "search")
-
-        memory["last_query"] = query
-
-        speak(f"Searching YouTube for {query}, sir.")
-        webbrowser.open(f"https://www.youtube.com/results?search_query={query}")
-
-        memory["last_action"] = "youtube_search"
-        return True
-
-    # ---------- YOUTUBE ----------
-    if intent == "youtube":
-        speak("Opening YouTube, sir.")
-        webbrowser.open("https://www.youtube.com")
-
-        memory["last_site"] = "youtube"
-        memory["last_action"] = "youtube"
-        return True
-
-    # ---------- SEARCH ----------
-    if intent == "search":
-        query = extract_target(text, "search")
-
-        speak(f"Searching for {query}, sir.")
-        webbrowser.open(f"https://www.google.com/search?q={query}")
-        return True
-
-    # ---------- TIME ----------
-    if intent == "time":
-        now = datetime.now().strftime("%H:%M")
-        speak(f"The time is {now}, sir.")
-        return True
-
-    # ---------- IDENTITY ----------
-    if intent == "identity":
-        speak("I am NOVA, your neural operating virtual assistant.")
-        return True
-
-    # ---------- UNKNOWN ----------
-    return False
-
-# =========================
-# OPEN HANDLER
-# =========================
 def handle_open(text):
 
-    target = extract_target(text, "open")
+    target = extract_target(text, "open").lower()
 
     noise = ["for", "me", "please", "the", "a", "an", "could", "you", "just"]
-    words = target.split()
-    words = [w for w in words if w not in noise]
 
-    target = "".join(words)
+    for n in noise:
+        target = target.replace(f" {n} ", " ")
 
-    if len(target) < 2:
-        speak("I didn't catch that properly, sir.")
-        return True
+    target = target.strip()
 
-    # ---------- APP ----------
-    for app in apps:
-        if app in target:
-            speak(f"Opening {app}, sir.")
-            os.startfile(apps[app])
+    print("DEBUG target:", target)
 
-            memory["last_app"] = app
-            memory["last_action"] = "open_app"
-            return True
+    # ---------- APP MATCH ----------
+    for app, aliases in app_aliases.items():
+        for alias in aliases:
+            if alias in target:
+                print(f"DEBUG matched app: {app}")
 
-    # ---------- SITE ----------
+                speak(f"Opening {app}, sir.")
+                print("DEBUG apps keys:", apps.keys())
+                print("DEBUG app requested:", app)
+                os.startfile(apps[app])
+
+                memory["last_app"] = app
+                memory["last_action"] = "open_app"
+                return True   # 🚨 CRITICAL
+
+    # ---------- SITE MATCH ----------
     site = re.sub(r"[^a-z0-9]", "", target)
 
     url = resolve_site(site)
@@ -241,87 +224,112 @@ def handle_open(text):
         speak("I couldn't identify the website properly, sir.")
         return True
 
-    speak(f"Opening {site}, sir.")
-    webbrowser.open(url)
-
-def resolve_site(site):
-
-    uk_sites = {
-        "amazon": "https://www.amazon.co.uk",
-        "ebay": "https://www.ebay.co.uk",
-        "bbc": "https://www.bbc.co.uk",
-        "bbcnews": "https://www.bbc.co.uk/news",
-        "google": "https://www.google.co.uk",
-        "youtube": "https://www.youtube.com"
-    }
-
-    # exact match first
-    if site in uk_sites:
-        return uk_sites[site]
-
-    # fuzzy safety layer
-    known = ["amazon", "ebay", "bbc", "youtube", "google"]
-
-    for k in known:
-        if k in site:
-            return uk_sites[k]
-
-    # ❗ fallback safety check (IMPORTANT)
-    if len(site) < 4:
-        return None
-
-def resolve_site(site):
-
-    known = {
-        "amazon": "https://www.amazon.co.uk",
-        "ebay": "https://www.ebay.co.uk",
-        "bbc": "https://www.bbc.co.uk",
-        "bbc news": "https://www.bbc.co.uk/news",
-        "google": "https://www.google.co.uk",
-        "youtube": "https://www.youtube.com"
-    }
-
-    site = site.lower().strip()
-
-    if site in known:
-        return known[site]
-
-    # fallback safety rule (NO broken guesses)
-    if len(site) < 4:
-        return None
-
-    return f"https://www.{site}.com"
+    print(f"DEBUG opening site: {site}")
 
     speak(f"Opening {site}, sir.")
     webbrowser.open(url)
 
     memory["last_site"] = site
     memory["last_action"] = "open_site"
+
     return True
 
 # =========================
-# MAIN LOOP
+# EXECUTION
 # =========================
-speak("NOVA core v3 online.")
+def execute(text):
+
+    intent = get_intent(text)
+
+    # ✅ ADD THIS BLOCK
+    if intent in ["open", "youtube_search", "youtube", "search", "repeat"]:
+        jarvis_ack()
+
+    if intent == "open":
+        return handle_open(text)
+
+    if intent == "youtube_search":
+        query = text.replace("youtube", "").replace("search", "").strip()
+
+        speak(f"Searching YouTube for {query}, sir.")
+        webbrowser.open(f"https://www.youtube.com/results?search_query={query}")
+
+        memory["last_query"] = query
+        return True
+
+    if intent == "youtube":
+        speak("Opening YouTube, sir.")
+        webbrowser.open("https://www.youtube.com")
+        memory["last_site"] = "youtube"
+        return True
+
+    if intent == "search":
+        query = text.replace("search", "").strip()
+
+        speak(f"Searching for {query}, sir.")
+        webbrowser.open(f"https://www.google.com/search?q={query}")
+        return True
+
+    if intent == "time":
+        now = datetime.now().strftime("%H:%M")
+        speak(f"The time is {now}, sir.")
+        return True
+
+    if intent == "repeat":
+
+        if memory["last_query"]:
+            webbrowser.open(f"https://www.youtube.com/results?search_query={memory['last_query']}")
+            speak("Repeating last search, sir.")
+            return True
+
+        if memory["last_site"]:
+            webbrowser.open(resolve_site(memory["last_site"]))
+            speak("Opening last site again, sir.")
+            return True
+
+        if memory["last_app"]:
+            os.startfile(apps[memory["last_app"]])
+            speak("Reopening last app, sir.")
+            return True
+
+        speak("Nothing to repeat, sir.")
+        return True
+
+    return False
+
+# =========================
+# MAIN LOOP (STABLE)
+# =========================
+speak("Hello sir, I am your neural operating virtual assistant, NOVA. How can I assist you today?")
 
 while True:
 
     raw = listen()
-    if not raw:
+
+    if not raw or not isinstance(raw, str):
         continue
 
     text = clean(raw)
+
+    if not text:
+        continue
+
     text = fix_speech_errors(text)
 
     if not is_valid_command(text):
-     speak("I didn't catch that clearly, sir.")
+        speak("I didn't catch that clearly, sir.")
         continue
 
     if "stop" in text:
-        speak("Shutting down, sir.")
+        speak("Shutting down, sir. Have a great day!")
         break
 
-    success = execute(text)
+    try:
+        success = execute(text)
+    except Exception as e:
+        print("ERROR:", e)
+        speak("Something went wrong, sir.")
+        continue
 
     if not success:
         speak("I couldn't process that request, sir.")
