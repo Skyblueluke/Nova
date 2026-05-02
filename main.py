@@ -83,6 +83,39 @@ def clean(text):
 
     return " ".join(text.split())
 
+
+def fix_speech_errors(text):
+    corrections = {
+        "amazn": "amazon",
+        "amzon": "amazon",
+        "mzon": "amazon",
+        "yotube": "youtube",
+        "tube": "youtube",
+        "googel": "google",
+        "googl": "google",
+        "bbcne": "bbc news",
+        "netflixx": "netflix"
+    }
+
+def is_valid_command(text):
+    text = text.strip()
+
+    # too short = likely broken speech
+    if len(text) < 3:
+        return False
+
+    # single random fragments like "mzon"
+    if len(text.split()) == 1 and len(text) < 4:
+        return False
+
+    return True
+
+    for wrong, correct in corrections.items():
+        text = text.replace(wrong, correct)
+
+    return text
+
+
 # =========================
 # INTENT DETECTION
 # =========================
@@ -202,7 +235,62 @@ def handle_open(text):
     # ---------- SITE ----------
     site = re.sub(r"[^a-z0-9]", "", target)
 
-    url = uk_sites.get(site, f"https://www.{site}.com")
+    url = resolve_site(site)
+
+    if not url:
+        speak("I couldn't identify the website properly, sir.")
+        return True
+
+    speak(f"Opening {site}, sir.")
+    webbrowser.open(url)
+
+def resolve_site(site):
+
+    uk_sites = {
+        "amazon": "https://www.amazon.co.uk",
+        "ebay": "https://www.ebay.co.uk",
+        "bbc": "https://www.bbc.co.uk",
+        "bbcnews": "https://www.bbc.co.uk/news",
+        "google": "https://www.google.co.uk",
+        "youtube": "https://www.youtube.com"
+    }
+
+    # exact match first
+    if site in uk_sites:
+        return uk_sites[site]
+
+    # fuzzy safety layer
+    known = ["amazon", "ebay", "bbc", "youtube", "google"]
+
+    for k in known:
+        if k in site:
+            return uk_sites[k]
+
+    # ❗ fallback safety check (IMPORTANT)
+    if len(site) < 4:
+        return None
+
+def resolve_site(site):
+
+    known = {
+        "amazon": "https://www.amazon.co.uk",
+        "ebay": "https://www.ebay.co.uk",
+        "bbc": "https://www.bbc.co.uk",
+        "bbc news": "https://www.bbc.co.uk/news",
+        "google": "https://www.google.co.uk",
+        "youtube": "https://www.youtube.com"
+    }
+
+    site = site.lower().strip()
+
+    if site in known:
+        return known[site]
+
+    # fallback safety rule (NO broken guesses)
+    if len(site) < 4:
+        return None
+
+    return f"https://www.{site}.com"
 
     speak(f"Opening {site}, sir.")
     webbrowser.open(url)
@@ -223,6 +311,11 @@ while True:
         continue
 
     text = clean(raw)
+    text = fix_speech_errors(text)
+
+    if not is_valid_command(text):
+     speak("I didn't catch that clearly, sir.")
+        continue
 
     if "stop" in text:
         speak("Shutting down, sir.")
